@@ -1,0 +1,149 @@
+aws iam create-role \
+--role-name myAmazonEKSClusterRole-missou \
+--assume-role-policy-document file://eks-cluster-role-trust-policy.json
+
+
+aws iam attach-role-policy \
+--policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy \
+--role-name myAmazonEKSClusterRole-missou
+
+aws cloudformation create-stack --stack-name my-eks-custom-networking-vpc \
+--template-url https://s3.us-west-2.amazonaws.com/amazon-eks/cloudformation/2020-10-29/amazon-eks-vpc-private-subnets.yaml \
+--parameters ParameterKey=VpcBlock,ParameterValue=192.168.0.0/24 \
+ParameterKey=PrivateSubnet01Block,ParameterValue=192.168.0.64/27 \
+ParameterKey=PrivateSubnet02Block,ParameterValue=192.168.0.96/27 \
+ParameterKey=PublicSubnet01Block,ParameterValue=192.168.0.0/27 \
+ParameterKey=PublicSubnet02Block,ParameterValue=192.168.0.32/27
+
+{
+    "StackId": "arn:aws:cloudformation:us-east-1:111264154006:stack/my-eks-custom-networking-vpc/58248ac0-bd95-11ed-8faf-0a4fec1bd9e9"
+}
+
+subnet_id_1=$(aws cloudformation describe-stack-resources --stack-name my-eks-custom-networking-vpc --query "StackResources[?LogicalResourceId=='PrivateSubnet01'].PhysicalResourceId" --output text) subnet_id_2=$(aws cloudformation describe-stack-resources --stack-name my-eks-custom-networking-vpc --query "StackResources[?LogicalResourceId=='PrivateSubnet02'].PhysicalResourceId" --output text)
+
+
+az_1=$(aws ec2 describe-subnets --subnet-ids $subnet_id_1 --query 'Subnets[*].AvailabilityZone' --output text)
+az_2=$(aws ec2 describe-subnets --subnet-ids $subnet_id_2 --query 'Subnets[*].AvailabilityZone' --output text)
+
+echo $subnet_id_1
+subnet-040897f82bec3710c
+echo $subnet_id_2
+subnet-0e080432f64baf6ce
+
+
+aws eks create-cluster --region us-east-1 --name my-cluster-missou \
+--kubernetes-version 1.24 \
+--role-arn arn:aws:iam::$account_id:role/myAmazonEKSClusterRole \
+--resources-vpc-config subnetIds=$subnet_id_1","$subnet_id_2
+
+
+aws eks describe-cluster --name my-cluster-missou --query cluster.status
+
+curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.24.9/2023-01-11/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+mkdir -p $HOME/bin && mv ./kubectl $HOME/bin/kubectl && export
+PATH=$PATH:$HOME/bin
+kubectl version --short -o yaml
+
+
+aws eks update-kubeconfig --region us-east-1 --name my-cluster-missou
+
+1.2 EKS avec eksctl
+
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+
+
+eksctl create cluster --version=1.24 --name=my-cluster-missou \
+--nodes=2 --managed --region=us-east-1 --node-type t2.micro
+
+Création et utilisation d'un cluster EKS
+
+aws ec2 create-key-pair \
+--key-name my-eks-key-missou \
+--key-type rsa \
+--key-format pem \
+--query "KeyMaterial" \
+--output text > my-key-pair-missou.pem
+
+
+curl -o eks.yaml https://raw.githubusercontent.com/h-medjahed/aws-eks-stack/main/eks-cloudformation.yaml
+aws cloudformation create-stack --stack-name EKS-missou --template-body file://eks.yaml --parameters ParameterKey=AvailabilityZonePublicSubnet01,ParameterValue="us-east-1a" ParameterKey=AvailabilityZonePublicSubnet02,ParameterValue="us-east-1b" ParameterKey=EKSKeyPair,ParameterValue="my-eks-key-missou" --capabilities CAPABILITY_NAMED_IAM
+
+
+{
+    "StackId": "arn:aws:cloudformation:us-east-1:111264154006:stack/EKS-missou/31c7d330-bdab-11ed-9bfe-129d01248363"
+}
+
+
+
+aws cloudformation create-stack --stack-name EKS-missou --template-body file://eks.yaml --parameters ParameterKey=AvailabilityZonePublicSubnet01,ParameterValue="us-east-1a" ParameterKey=AvailabilityZonePublicSubnet02,ParameterValue="us-east-1b" ParameterKey=EKSKeyPair,ParameterValue="my-eks-key-missou" ParameterKey=EKSIAMRoleName,ParameterValue=ESKmissou ParameterKey=EKSClusterName,ParameterValue=eksmh --capabilities CAPABILITY_NAMED_IAM
+
+
+oidc_id=$(aws eks describe-cluster --name EKS --region us-east-1 --query  "cluster.identity.oidc.issuer" --output text | cut -d '/' -f 5)
+aws iam list-open-id-connect-providers | grep $oidc_id | cut -d "/" -f4
+
+2BBBB93520AAFA571AA40201ADE66C29"
+
+eksctl utils associate-iam-oidc-provider --cluster eksmh \
+--approve --region us-east-1
+
+aws eks describe-cluster \
+--name eksmh\
+--query "cluster.identity.oidc.issuer" \
+--output text
+--region us-east-1
+
+https://oidc.eks.us-east-1.amazonaws.com/id/78C2D1C791E26BCA4E09C5F9D09C6E8D
+
+
+
+aws iam create-role --role-name Rolemissou --assume-role-policy-document file://"aws-ebs-csi-driver-trust-policy.json"
+
+aws iam attach-role-policy \
+--policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+--role-name Rolemissou
+
+kubectl annotate serviceaccount ebs-csi-controller-sa \
+-n kube-system \
+eks.amazonaws.com/role-arn=arn:aws:iam::111264154006:role/Rolemissou
+
+
+helm upgrade -i kubecost oci://public.ecr.aws/kubecost/cost-analyzer --version 1.100.2 \
+--namespace kubecost --create-namespace \  
+-f https://raw.githubusercontent.com/kubecost/cost-analyzer-helm-chart/develop/cost-analyzer/values-eks-cost-monitoring.yaml
+
+kubectl port-forward --namespace kubecost deployment/kubecost-cost-analyzer 9090 --address=0.0.0.0
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Federated": "arn:aws:iam:::111264154006:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/78C2D1C791E26BCA4E09C5F9D09C6E8D"
+        },
+        "Action": "sts:AssumeRoleWithWebIdentity",
+        "Condition": {
+          "StringEquals": {
+            "oidc.eks.us-east-1.amazonaws.com/id/78C2D1C791E26BCA4E09C5F9D09C6E8D:aud": "sts.amazonaws.com",
+            "oidc.eks.us-east-1.amazonaws.com/id/78C2D1C791E26BCA4E09C5F9D09C6E8D:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          }
+        }
+      }
+    ]
+  }
+--------------------------------challenge----------------------------------------
+
+ kubectl apply -f app-service.yaml
+ kubectl apply -f app-deployment.yaml
+si tu veux afficher le deployment tu peux mettre le DNS sur le browser
+
+
+
+
+
+
+
+
+
+
